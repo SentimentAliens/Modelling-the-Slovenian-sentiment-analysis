@@ -1,4 +1,8 @@
 # Modelling-the-Slovenian-sentiment-analysis
+## Research Questions
+- What is the number of misllabelled number of instances present in the given dataset ?
+- How much performance can be improved when a cleaner dataset is used for training ?
+  
 ## Links
 - [DATASET](https://www.clarin.si/repository/xmlui/handle/11356/1115)
 - [STEPS](/codes/STEPS.md)
