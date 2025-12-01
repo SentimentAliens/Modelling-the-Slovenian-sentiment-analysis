@@ -9,15 +9,13 @@
 
 ## Methodology
 <ol>
-  <li>Detection of erronous labels in dataset. Refer STEPS.md for pseudo code and explanation</li>
+  <li>Detection of erroneous labels in the dataset. Refer STEPS.md for pseudo code and explanation </li>
   <li>Manual Correction of those labels</li>
-  <li>Using the test set to get zero-shot accuracy on GAMS model TODO: choose a model that can fit in 40GB GPU </li>
+  <li>Using the test set to get zero-shot accuracy on GAMS model <i>TODO: choose a model that can fit in 40GB GPU</i> </li>
   <li>Training</li>
-  <li>Evalution</li>
+  <li>Evaluation</li>
   <ol>
       <li>Performance metric : Precision, Recall, F1, Accuracy</li>
       <li>Qualitative analysis</li>
     </ol>
 </ol>
- 
- 
