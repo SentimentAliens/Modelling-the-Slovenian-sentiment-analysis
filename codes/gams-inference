@@ -1,0 +1,79 @@
+This is the simplest way to get predictions from the `cjvt/GaMS-2B-Instruct` model using a GPU, leveraging the Hugging Face `transformers` library's `pipeline` function.
+
+The code uses `device_map="auto"` to automatically load the model onto your available GPU (or multiple GPUs) in the most memory-efficient way.
+
+```python
+import torch
+from transformers import pipeline
+
+# 1. Define the model ID
+model_id = "cjvt/GaMS-2B-Instruct"
+
+# 2. Check for CUDA (GPU) availability and define device mapping
+if torch.cuda.is_available():
+    print("CUDA GPU detected. Loading model with device_map='auto'.")
+    device_map = "auto"
+else:
+    print("No CUDA GPU detected. Loading model onto CPU. Performance will be slower.")
+    device_map = "cpu"
+
+# 3. Initialize the text generation pipeline
+# We use torch_dtype=torch.bfloat16 or torch.float16 for optimized GPU performance and memory usage.
+# If your GPU does not support bfloat16, change it to torch.float16 (or remove it, but that may use more VRAM).
+try:
+    pline = pipeline(
+        "text-generation",
+        model=model_id,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16,
+        device_map=device_map,
+    )
+except Exception as e:
+    # Fallback to float32 or simpler loading if the dtype causes an issue
+    print(f"Warning: Failed to load with bfloat16/float16. Attempting standard load. Error: {e}")
+    pline = pipeline(
+        "text-generation",
+        model=model_id,
+        device_map=device_map,
+    )
+
+
+# 4. Define the input message (using the ChatML format this instruct model expects)
+# GaMS models support both English and Slovenian.
+messages = [
+    {"role": "user", "content": "Explain the concept of large language models (LLMs) in three sentences."},
+]
+
+# 5. Generate the prediction
+print("\n--- Generating Response ---")
+response = pline(
+    messages,
+    max_new_tokens=256,
+    do_sample=True,
+    temperature=0.7,
+    top_p=0.9,
+)
+
+# 6. Extract and print the model's response
+# The output format is a list of dictionaries, where the final element in 'generated_text'
+# contains the model's response content.
+
+if response and response[0].get("generated_text"):
+    # The generated_text is the full conversation list including the model's reply
+    full_conversation = response[0]["generated_text"]
+    
+    # Get the last message in the conversation, which is the model's reply
+    model_reply = full_conversation[-1]
+    
+    if model_reply["role"] == "model" and model_reply.get("content"):
+        print("\nModel's response:")
+        print("--------------------")
+        print(model_reply["content"])
+    else:
+        # Fallback for models that return raw text instead of structured chat history in the pipeline
+        raw_text = pline.tokenizer.decode(response[0]['generated_sequence'].logits.argmax(dim=-1).tolist(), skip_special_tokens=True)
+        print("\nModel's raw text output:")
+        print("--------------------")
+        print(raw_text)
+else:
+    print("Generation failed or returned an unexpected format.")
+```
