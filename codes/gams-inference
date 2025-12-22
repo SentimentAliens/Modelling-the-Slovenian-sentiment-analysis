@@ -1,0 +1,132 @@
+```
+# ------------------------------------------------------------
+# 0️⃣  Install required libraries (run once)
+# ------------------------------------------------------------
+# !pip install -q datasets transformers torch scikit-learn tqdm
+
+# ------------------------------------------------------------
+# 1️⃣  Imports
+# ------------------------------------------------------------
+import json
+from pathlib import Path
+
+import torch
+import pandas as pd
+from datasets import load_dataset
+from sklearn.metrics import classification_report, precision_recall_fscore_support
+from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# ------------------------------------------------------------
+# 2️⃣  Load the fine‑tuned model & tokenizer
+# ------------------------------------------------------------
+# Path to the checkpoint created in the previous step
+ckpt_dir = Path("./gams-2b-finetuned")   # <-- change if you saved elsewhere
+
+model = AutoModelForCausalLM.from_pretrained(
+    ckpt_dir,
+    device_map="auto",
+    torch_dtype=torch.bfloat16,
+    load_in_8bit=True,          # keeps memory low
+)
+
+tokenizer = AutoTokenizer.from_pretrained(ckpt_dir)
+
+# ------------------------------------------------------------
+# 3️⃣  Load & tokenise the test set
+# ------------------------------------------------------------
+# Replace this with your own test file
+test_file = Path("test.csv")   # CSV with columns `text` & `label`
+assert test_file.exists(), f"{test_file} not found!"
+
+# Load with HuggingFace Datasets for convenience
+test_ds = load_dataset("csv", data_files=str(test_file), split="train")
+
+# Tokenise – we keep the same logic that was used for training
+def _tokenize(batch):
+    return tokenizer(
+        batch["text"],
+        truncation=True,
+        padding="max_length",
+        max_length=tokenizer.model_max_length,
+    )
+
+tokenized_test = test_ds.map(_tokenize, batched=True, remove_columns=test_ds.column_names)
+tokenized_test.set_format("torch", columns=["input_ids", "attention_mask", "label"])
+
+# ------------------------------------------------------------
+# 4️⃣  Evaluation loop
+# ------------------------------------------------------------
+batch_size = 8
+loader = DataLoader(tokenized_test, batch_size=batch_size, shuffle=False)
+
+all_preds = []
+all_labels = []
+
+misclassified = []   # will hold dicts that we later dump
+
+print("Evaluating on test set…")
+for batch in tqdm(loader, desc="Batches"):
+    # Move to GPU
+    input_ids = batch["input_ids"].to(model.device)
+    attention_mask = batch["attention_mask"].to(model.device)
+    labels = batch["label"].numpy()
+
+    # Forward pass – we only need the logits
+    with torch.no_grad():
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        logits = outputs.logits          # shape: (B, seq_len, vocab_size)
+
+    # ----- Predict the class ---------------------------------
+    # For a causal LM that was fine‑tuned for classification,
+    # the last token of the logits corresponds to the predicted class.
+    last_logits = logits[:, -1, :]     # shape (B, vocab_size)
+    # Take the most‑likely token ID
+    pred_ids = torch.argmax(last_logits, dim=-1).cpu().numpy()
+
+    # If you had a mapping from token ID → class ID, apply it here.
+    # For simplicity we assume the vocabulary is *exactly* the class IDs.
+    preds = pred_ids.tolist()
+
+    all_preds.extend(preds)
+    all_labels.extend(labels)
+
+    # ----- Record mis‑classifications ------------------------
+    for idx, (true, pred) in enumerate(zip(labels, preds)):
+        if true != pred:
+            misclassified.append({
+                "idx_in_batch": idx,
+                "text": batch["text"][idx],
+                "true_label": true,
+                "pred_label": pred,
+            })
+
+# ------------------------------------------------------------
+# 5️⃣  Compute metrics
+# ------------------------------------------------------------
+precision, recall, f1, _ = precision_recall_fscore_support(
+    all_labels, all_preds, average="weighted"
+)
+
+print("\n===== Evaluation Report =====")
+print(f"Precision: {precision:.4f}")
+print(f"Recall   : {recall:.4f}")
+print(f"F1‑score : {f1:.4f}")
+
+# Human‑readable classification report (optional)
+print("\nFull classification report:")
+print(classification_report(all_labels, all_preds, digits=4))
+
+# ------------------------------------------------------------
+# 6️⃣  Dump mis‑classified examples
+# ------------------------------------------------------------
+misfile = Path("misclassified.jsonl")
+with misfile.open("w", encoding="utf-8") as f:
+    for rec in misclassified:
+        f.write(json.dumps(rec) + "\n")
+
+
+print(f"\n{len(misclassified)} mis‑classified samples written to {misfile}")
+
+```
