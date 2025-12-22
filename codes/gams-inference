@@ -1,132 +1,133 @@
-```
-# ------------------------------------------------------------
-# 0️⃣  Install required libraries (run once)
-# ------------------------------------------------------------
-# !pip install -q datasets transformers torch scikit-learn tqdm
-
-# ------------------------------------------------------------
-# 1️⃣  Imports
-# ------------------------------------------------------------
-import json
-from pathlib import Path
-
+import os
 import torch
 import pandas as pd
-from datasets import load_dataset
-from sklearn.metrics import classification_report, precision_recall_fscore_support
-from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from unsloth import FastLanguageModel
+from datasets import Dataset
+from trl import SFTTrainer
+from transformers import TrainingArguments
+from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
 
-# ------------------------------------------------------------
-# 2️⃣  Load the fine‑tuned model & tokenizer
-# ------------------------------------------------------------
-# Path to the checkpoint created in the previous step
-ckpt_dir = Path("./gams-2b-finetuned")   # <-- change if you saved elsewhere
+# 1. Configuration
+model_name = "cjvt/GaMS-2B-Instruct"
+max_seq_length = 1024
+dtype = None # Auto detection (Float16/Bfloat16)
+load_in_4bit = True # Use 4bit to save VRAM for faster iteration
 
-model = AutoModelForCausalLM.from_pretrained(
-    ckpt_dir,
-    device_map="auto",
-    torch_dtype=torch.bfloat16,
-    load_in_8bit=True,          # keeps memory low
+# 2. Load Model & Tokenizer
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name = model_name,
+    max_seq_length = max_seq_length,
+    dtype = dtype,
+    load_in_4bit = load_in_4bit,
 )
 
-tokenizer = AutoTokenizer.from_pretrained(ckpt_dir)
-
-# ------------------------------------------------------------
-# 3️⃣  Load & tokenise the test set
-# ------------------------------------------------------------
-# Replace this with your own test file
-test_file = Path("test.csv")   # CSV with columns `text` & `label`
-assert test_file.exists(), f"{test_file} not found!"
-
-# Load with HuggingFace Datasets for convenience
-test_ds = load_dataset("csv", data_files=str(test_file), split="train")
-
-# Tokenise – we keep the same logic that was used for training
-def _tokenize(batch):
-    return tokenizer(
-        batch["text"],
-        truncation=True,
-        padding="max_length",
-        max_length=tokenizer.model_max_length,
-    )
-
-tokenized_test = test_ds.map(_tokenize, batched=True, remove_columns=test_ds.column_names)
-tokenized_test.set_format("torch", columns=["input_ids", "attention_mask", "label"])
-
-# ------------------------------------------------------------
-# 4️⃣  Evaluation loop
-# ------------------------------------------------------------
-batch_size = 8
-loader = DataLoader(tokenized_test, batch_size=batch_size, shuffle=False)
-
-all_preds = []
-all_labels = []
-
-misclassified = []   # will hold dicts that we later dump
-
-print("Evaluating on test set…")
-for batch in tqdm(loader, desc="Batches"):
-    # Move to GPU
-    input_ids = batch["input_ids"].to(model.device)
-    attention_mask = batch["attention_mask"].to(model.device)
-    labels = batch["label"].numpy()
-
-    # Forward pass – we only need the logits
-    with torch.no_grad():
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        logits = outputs.logits          # shape: (B, seq_len, vocab_size)
-
-    # ----- Predict the class ---------------------------------
-    # For a causal LM that was fine‑tuned for classification,
-    # the last token of the logits corresponds to the predicted class.
-    last_logits = logits[:, -1, :]     # shape (B, vocab_size)
-    # Take the most‑likely token ID
-    pred_ids = torch.argmax(last_logits, dim=-1).cpu().numpy()
-
-    # If you had a mapping from token ID → class ID, apply it here.
-    # For simplicity we assume the vocabulary is *exactly* the class IDs.
-    preds = pred_ids.tolist()
-
-    all_preds.extend(preds)
-    all_labels.extend(labels)
-
-    # ----- Record mis‑classifications ------------------------
-    for idx, (true, pred) in enumerate(zip(labels, preds)):
-        if true != pred:
-            misclassified.append({
-                "idx_in_batch": idx,
-                "text": batch["text"][idx],
-                "true_label": true,
-                "pred_label": pred,
-            })
-
-# ------------------------------------------------------------
-# 5️⃣  Compute metrics
-# ------------------------------------------------------------
-precision, recall, f1, _ = precision_recall_fscore_support(
-    all_labels, all_preds, average="weighted"
+# Add LoRA Adapters
+model = FastLanguageModel.get_peft_model(
+    model,
+    r = 16,
+    target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    lora_alpha = 16,
+    lora_dropout = 0,
+    bias = "none",
+    use_gradient_checkpointing = "unsloth",
+    random_state = 3407,
 )
 
-print("\n===== Evaluation Report =====")
-print(f"Precision: {precision:.4f}")
-print(f"Recall   : {recall:.4f}")
-print(f"F1‑score : {f1:.4f}")
+# 3. Data Preparation
+# Note: SentiNews 1.0 (11356/1115) usually contains 'SentiNews-sentence.csv'
+# Labels: 1(Very Neg), 2(Neg), 3(Neu), 4(Pos), 5(Very Pos) OR simplified 3-class.
+# We will map them to text labels for the instruction model.
 
-# Human‑readable classification report (optional)
-print("\nFull classification report:")
-print(classification_report(all_labels, all_preds, digits=4))
+def load_sentinews():
+    # Replace with the path to your downloaded SentiNews-sentence.csv
+    # You can download it from: https://www.clarin.si/repository/xmlui/handle/11356/1115
+    df = pd.read_csv("SentiNews-sentence.csv") 
+    
+    # Map numerical labels to Slovenian text labels
+    label_map = {1: "zelo negativno", 2: "negativno", 3: "nevtralno", 4: "pozitivno", 5: "zelo pozitivno"}
+    df['sentiment_text'] = df['sentiment'].map(label_map)
+    
+    train_df, test_df = train_test_split(df, test_size=0.15, random_state=42)
+    return train_df, test_df
 
-# ------------------------------------------------------------
-# 6️⃣  Dump mis‑classified examples
-# ------------------------------------------------------------
-misfile = Path("misclassified.jsonl")
-with misfile.open("w", encoding="utf-8") as f:
-    for rec in misclassified:
-        f.write(json.dumps(rec) + "\n")
+train_df, test_df = load_sentinews()
 
+# Formatting for GaMS-2B-Instruct (Gemma 2 Prompt Template)
+prompt_style = """<start_of_turn>user
+Določi sentiment naslednjega slovenskega besedila:
+{}<end_of_turn>
+<start_of_turn>model
+{}<end_of_turn>"""
 
-print(f"\n{len(misclassified)} mis‑classified samples written to {misfile}")
+def formatting_prompts_func(examples):
+    texts = []
+    for content, label in zip(examples["content"], examples["sentiment_text"]):
+        text = prompt_style.format(content, label)
+        texts.append(text)
+    return { "text" : texts }
 
-```
+train_dataset = Dataset.from_pandas(train_df).map(formatting_prompts_func, batched = True)
+
+# 4. Training
+trainer = SFTTrainer(
+    model = model,
+    train_dataset = train_dataset,
+    dataset_text_field = "text",
+    max_seq_length = max_seq_length,
+    args = TrainingArguments(
+        per_device_train_batch_size = 4,
+        gradient_accumulation_steps = 4,
+        warmup_steps = 100,
+        max_steps = 500, # Adjust based on dataset size
+        learning_rate = 2e-4,
+        fp16 = not torch.cuda.is_bf16_supported(),
+        bf16 = torch.cuda.is_bf16_supported(),
+        logging_steps = 10,
+        output_dir = "outputs",
+        save_strategy = "steps",
+        save_steps = 250,
+    ),
+)
+
+trainer.train()
+
+# 5. Save the Best Model
+model.save_pretrained("gams_sentinews_model")
+tokenizer.save_pretrained("gams_sentinews_model")
+
+# 6. Evaluation on Test Split
+print("\nStarting Evaluation...")
+FastLanguageModel.for_inference(model)
+
+predictions = []
+true_labels = test_df['sentiment_text'].tolist()
+mismatches = []
+
+for index, row in test_df.iterrows():
+    inputs = tokenizer(
+        [prompt_style.format(row['content'], "")], 
+        return_tensors = "pt"
+    ).to("cuda")
+    
+    outputs = model.generate(**inputs, max_new_tokens = 10)
+    # Extract only the generated part
+    pred_text = tokenizer.decode(outputs[0], skip_special_tokens=True).split("model\n")[-1].strip()
+    
+    predictions.append(pred_text)
+    
+    if pred_text != row['sentiment_text']:
+        mismatches.append({
+            "text": row['content'],
+            "original_label": row['sentiment_text'],
+            "predicted_label": pred_text
+        })
+
+# 7. Compute Metrics
+report = classification_report(true_labels, predictions)
+print(report)
+
+# 8. Save Mismatches
+mismatches_df = pd.DataFrame(mismatches)
+mismatches_df.to_csv("test_mismatches.csv", index=False, encoding='utf-8')
+print("Mismatched instances saved to 'test_mismatches.csv'.")
