@@ -99,8 +99,8 @@ The qualitative analysis identified these patterns in misclassifications:
 ## Fine-tuned GaMS-2B models
 
 Available on HuggingFace:
-- GaMS-2B model finetuned on original KKS dataset: https://huggingface.co/lea-vodopivec7/gams-2b-finetuned-kks-V1
-- GaMS-2B model finetuned on corrected KKS dataset: https://huggingface.co/lea-vodopivec7/gams-2b-finetuned-kks-V0
+- GaMS-2B model finetuned on original KKS dataset: https://huggingface.co/lea-vodopivec7/gams-2b-finetuned-kks-V0
+- GaMS-2B model finetuned on corrected KKS dataset: https://huggingface.co/lea-vodopivec7/gams-2b-finetuned-kks-V1
 
 
 ## 📂 Project Structure
@@ -131,3 +131,4 @@ Modelling_the_Slovenian_sentiment_analysis/
 └── 📖 README.md                         # This file
 
 ```
+
