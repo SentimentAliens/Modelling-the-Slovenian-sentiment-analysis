@@ -96,7 +96,7 @@ The qualitative analysis identified these patterns in misclassifications:
 | Short/Ambiguous | Insufficient context | 12% |
 | Complex Syntax | Negation, conditionals | 5% |
 
-## Fine-tuned GaMS-2B models
+## 🤗 Fine-tuned GaMS-2B models
 
 Available on HuggingFace:
 - GaMS-2B model finetuned on original KKS dataset: https://huggingface.co/lea-vodopivec7/gams-2b-finetuned-kks-V0
@@ -131,4 +131,5 @@ Modelling_the_Slovenian_sentiment_analysis/
 └── 📖 README.md                         # This file
 
 ```
+
 
