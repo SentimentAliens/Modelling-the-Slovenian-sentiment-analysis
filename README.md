@@ -1,11 +1,6 @@
-# 🇸🇮 Slovenian Sentiment Analysis: A Multi-Model Comparative Study
+# Slovenian Sentiment Analysis: A Multi-Model Comparative Study
 
 <div align="center">
-
-![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red?logo=pytorch&logoColor=white)
-![Transformers](https://img.shields.io/badge/Transformers-HuggingFace-orange?logo=huggingface&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green)
 
 **A comprehensive research project comparing BERT-based models and Large Language Models for Slovenian sentiment analysis with a focus on label noise detection and correction.**
 
@@ -101,6 +96,13 @@ The qualitative analysis identified these patterns in misclassifications:
 | Short/Ambiguous | Insufficient context | 12% |
 | Complex Syntax | Negation, conditionals | 5% |
 
+## Fine-tuned GaMS-2B models
+
+Available on HuggingFace:
+- GaMS-2B model finetuned on original KKS dataset: https://huggingface.co/lea-vodopivec7/gams-2b-finetuned-kks-V1
+- GaMS-2B model finetuned on corrected KKS dataset: https://huggingface.co/lea-vodopivec7/gams-2b-finetuned-kks-V0
+
+
 ## 📂 Project Structure
 
 ```
@@ -127,4 +129,5 @@ Modelling_the_Slovenian_sentiment_analysis/
 │
 ├── 📋 Report.pdf                        # Research report
 └── 📖 README.md                         # This file
+
 ```
